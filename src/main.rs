@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, patch, post, put},
 };
 // Import Serde for JSON serialization/deserialization
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,10 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root))
         .route("/hello/:name", get(hello))
-        .route("/json", post(handle_json));
+        .route("/create", post(handle_post))
+        .route("/update", put(handle_put))
+        .route("/update", patch(handle_patch))
+        .route("/delete/:id", delete(handle_delete));
 
     // Create a socket address binding to localhost (127.0.0.1) on port 3000
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -119,6 +122,13 @@ struct InputData {
     age: u8, // u8 means unsigned 8-bit integer (0-255)
 }
 
+// Struct for PATCH requests - allows partial updates with optional fields
+#[derive(Deserialize)]
+struct PatchData {
+    name: Option<String>,
+    age: Option<u8>,
+}
+
 // Struct representing the JSON response to send back
 // Serialize trait allows automatic conversion from this struct to JSON
 #[derive(Serialize)]
@@ -131,7 +141,7 @@ struct ResponseData {
 // Returns 201 CREATED status code for successful resource creation
 // Example input: {"name": "Alice", "age": 30}
 // Example output: {"message": "Hello, Alice! You are 30 years old."}
-async fn handle_json(
+async fn handle_post(
     Json(payload): Json<InputData>,
 ) -> Result<(StatusCode, Json<ResponseData>), AppError> {
     // Structured logging with multiple fields
@@ -166,6 +176,121 @@ async fn handle_json(
                 "Hello, {}! You are {} years old.",
                 payload.name, payload.age
             ),
+        }),
+    ))
+}
+
+async fn handle_put(
+    Json(payload): Json<InputData>,
+) -> Result<(StatusCode, Json<ResponseData>), AppError> {
+    // Structured logging with multiple fields
+    info!(
+        name = %payload.name,
+        age = payload.age,
+        "Processing JSON request"
+    );
+
+    if payload.name.trim().is_empty() {
+        warn!("Empty name in JSON payload");
+        return Err(AppError::ValidationError(
+            "Name cannot be empty".to_string(),
+        ));
+    }
+
+    if payload.name.len() > 50 {
+        return Err(AppError::ValidationError(
+            "Name is too long (max 50 characters)".to_string(),
+        ));
+    }
+
+    if payload.age == 0 || payload.age > 120 {
+        warn!(age = payload.age, "Invalid age provided");
+        return Err(AppError::ValidationError("Invalid age".to_string()));
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(ResponseData {
+            message: format!(
+                "Hello, {}! You are {} years old.",
+                payload.name, payload.age
+            ),
+        }),
+    ))
+}
+
+// Handler for PATCH requests - allows partial updates
+// Only the fields provided will be updated
+// Returns 200 OK status code for successful partial updates
+// Example input: {"name": "Bob"} or {"age": 25} or both
+async fn handle_patch(
+    Json(payload): Json<PatchData>,
+) -> Result<(StatusCode, Json<ResponseData>), AppError> {
+    info!("Processing PATCH request");
+
+    // Validate name if provided
+    if let Some(ref name) = payload.name {
+        if name.trim().is_empty() {
+            warn!("Empty name in PATCH payload");
+            return Err(AppError::ValidationError(
+                "Name cannot be empty".to_string(),
+            ));
+        }
+        if name.len() > 50 {
+            return Err(AppError::ValidationError(
+                "Name is too long (max 50 characters)".to_string(),
+            ));
+        }
+        info!(name = %name, "Updating name");
+    }
+
+    // Validate age if provided
+    if let Some(age) = payload.age {
+        if age == 0 || age > 120 {
+            warn!(age = age, "Invalid age in PATCH payload");
+            return Err(AppError::ValidationError("Invalid age".to_string()));
+        }
+        info!(age = age, "Updating age");
+    }
+
+    // Build response message based on what was provided
+    let message = match (payload.name, payload.age) {
+        (Some(name), Some(age)) => format!("Updated: {}! You are {} years old.", name, age),
+        (Some(name), None) => format!("Updated name to: {}", name),
+        (None, Some(age)) => format!("Updated age to: {}", age),
+        (None, None) => {
+            warn!("No fields provided in PATCH request");
+            return Err(AppError::ValidationError(
+                "At least one field must be provided".to_string(),
+            ));
+        }
+    };
+
+    Ok((StatusCode::OK, Json(ResponseData { message })))
+}
+
+// Handler for DELETE requests - deletes a resource by ID
+// Returns 200 OK status code with confirmation message
+// Example: DELETE /delete/123
+async fn handle_delete(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<(StatusCode, Json<ResponseData>), AppError> {
+    info!(id = %id, "Processing DELETE request");
+
+    // Validate ID is not empty
+    if id.trim().is_empty() {
+        warn!("Empty ID provided for deletion");
+        return Err(AppError::ValidationError("ID cannot be empty".to_string()));
+    }
+
+    // In a real application, you would delete the resource from a database here
+    // For this example, we'll just return a success message
+    info!(id = %id, "Resource deleted successfully");
+
+    Ok((
+        StatusCode::OK,
+        Json(ResponseData {
+            message: format!("Resource with ID '{}' has been deleted", id),
         }),
     ))
 }

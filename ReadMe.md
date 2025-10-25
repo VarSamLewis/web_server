@@ -39,8 +39,8 @@
   API Features
 
   - More HTTP Methods
-    - PUT for updates
-    - PATCH for partial updates
+    - PUT for updates --Done
+    - PATCH for partial updates --Done
     - DELETE for removal
   - Query Parameters
     - Filtering: ?age_min=18&country=US
